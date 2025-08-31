@@ -1,0 +1,25 @@
+# Node modules
+frontend/node_modules/
+
+# Python virtual environment
+backend/venv/
+
+# Environment variables
+backend/.env
+
+# Next.js build output
+/frontend/.next/
+
+# VS Code workspace settings
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
