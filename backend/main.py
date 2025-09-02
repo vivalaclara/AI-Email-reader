@@ -1,46 +1,111 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+from models.email_models import (
+    PromptRequest, 
+    EmailProcessRequest, 
+    EmailProcessResponse,
+    EmailAnalysisResult
+)
+
+
+from services.llama_service import call_llama4_maverick
+from services.file_service import extract_text_from_pdf, extract_text_from_txt, validate_file_type
+from services.email_analysis_service import analyze_email_content
+from services.security_service import validate_file_security
+from services.logging_service import setup_logging, log_api_usage
+import time
 import os
-import requests
+
 load_dotenv()
 
+logger, security_logger = setup_logging()
+app = FastAPI(title="AI Email Analyzer", version="1.0.0")
 
-class EmailResponse(BaseModel):
-    category: str
-    suggestion: str
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        os.getenv("FRONTEND_URL", "http://localhost:3000"),
+        "http://127.0.0.1:3000",
+        "http://localhost:3001"
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
+)
 
-class PromptRequest(BaseModel):
-    prompt: str
+@app.get("/")
+async def root():
+    return {"message": "AI Email Analyzer API", "status": "running"}
 
-app = FastAPI()
-
-
-def call_llama4_maverick(prompt):
-    api_key = os.getenv('OPENROUTER_API_KEY')
-    if not api_key:
-        raise ValueError('API key não encontrada. Defina OPENROUTER_API_KEY nas variáveis de ambiente.')
-    url = 'https://openrouter.ai/api/v1/chat/completions'
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'http://localhost',  
-        'X-Title': 'AI-EMAILS'
-    }
-    data = {
-        "model": "meta-llama/llama-4-maverick:free",
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
-    }
-    response = requests.post(url, headers=headers, json=data)
-    response.raise_for_status()
-    return response.json()
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "ai-email-analyzer"}
 
 @app.post("/llama4")
 async def llama4_endpoint(req: PromptRequest):
     resposta = call_llama4_maverick(req.prompt)
     return resposta
+
+@app.post("/process-email-text", response_model=EmailProcessResponse)
+async def process_email_text(req: EmailProcessRequest):
+    start_time = time.time()
+    
+    try:
+        analysis_result = analyze_email_content(req.text_content)
+        analysis = EmailAnalysisResult(**analysis_result)
+        
+        processing_time = time.time() - start_time
+        log_api_usage("/process-email-text", len(req.text_content), processing_time)
+        
+        return EmailProcessResponse(
+            content=req.text_content,
+            file_type="text",
+            analysis=analysis
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar email de texto: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+        raise
+
+@app.post("/process-email-file", response_model=EmailProcessResponse)
+async def process_email_file(file: UploadFile = File(...)):
+    start_time = time.time()
+    
+    try:
+        file_content = await file.read()
+        
+        validate_file_security(file.filename, len(file_content))
+        
+        file_type = validate_file_type(file.filename)
+        
+        if file_type == 'pdf':
+            extracted_text = extract_text_from_pdf(file_content)
+        else:
+            extracted_text = extract_text_from_txt(file_content)
+        
+        if not extracted_text.strip():
+            raise HTTPException(status_code=400, detail="Não foi possível extrair texto do arquivo.")
+        
+        analysis_result = analyze_email_content(extracted_text)
+        analysis = EmailAnalysisResult(**analysis_result)
+        
+        processing_time = time.time() - start_time
+        log_api_usage("/process-email-file", len(extracted_text), processing_time)
+        
+        return EmailProcessResponse(
+            content=extracted_text,
+            file_type=file_type,
+            analysis=analysis
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar arquivo: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 if __name__ == "__main__":
     import uvicorn
