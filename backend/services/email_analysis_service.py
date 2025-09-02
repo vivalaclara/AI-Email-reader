@@ -11,8 +11,10 @@ Analise o seguinte conteúdo de email e forneça uma resposta em formato JSON se
     "confianca": número de 0 a 100,
     "resumo": "resumo breve do conteúdo",
     "motivo": "explicação da classificação",
-    "sugestao_resposta": "sugestão de resposta se aplicável ou null"
+    "sugestao_resposta": "sugestão de resposta apropriada"
 }}
+
+**IMPORTANTE: SEMPRE forneça uma sugestão de resposta, EXCETO quando o email explicitamente solicitar "não responda" ou "não é necessário responder".**
 
 **Critérios de classificação:**
 
@@ -37,6 +39,11 @@ Analise o seguinte conteúdo de email e forneça uma resposta em formato JSON se
 - Spam/marketing não solicitado
 - Mensagens automáticas de confirmação
 - Notificações de sistema sem ação requerida
+
+**Para sugestões de resposta:**
+- Para emails PRODUTIVOS: forneça uma resposta que aborde diretamente a solicitação
+- Para emails IMPRODUTIVOS: forneça uma resposta cordial e apropriada (agradecimento, confirmação de recebimento, etc.)
+- APENAS defina como null se o email explicitamente solicitar "não responda" ou "não é necessário responder"
 
 Conteúdo do email:
 {content}
@@ -72,13 +79,28 @@ def analyze_email_content(content: str) -> dict:
                 raise ValueError("JSON não encontrado na resposta")
                 
         except (json.JSONDecodeError, ValueError) as e:
+            # Verifica se o email solicita explicitamente não responder
+            no_response_keywords = ["não responda", "nao responda", "não é necessário responder", "não precisa responder"]
+            should_not_respond = any(keyword in content.lower() for keyword in no_response_keywords)
+            
+            # Determina se é produtivo ou improdutivo
+            is_productive = any(keyword in content.lower() for keyword in 
+                ["solicito", "preciso", "dúvida", "problema", "ajuda", "suporte", "urgente", "favor"])
+            
+            # Gera uma resposta padrão baseada no tipo
+            if should_not_respond:
+                default_response = None
+            elif is_productive:
+                default_response = "Obrigado pelo seu contato. Estamos analisando sua solicitação e retornaremos em breve com mais informações."
+            else:
+                default_response = "Obrigado pela sua mensagem. Recebemos e agradecemos o contato."
+            
             return {
-                "categoria": "Produtivo" if any(keyword in content.lower() for keyword in 
-                    ["solicito", "preciso", "dúvida", "problema", "ajuda", "suporte", "urgente"]) else "Improdutivo",
+                "categoria": "Produtivo" if is_productive else "Improdutivo",
                 "confianca": 60,
                 "resumo": content[:100] + "..." if len(content) > 100 else content,
                 "motivo": "Análise automática - falha na estruturação da resposta do modelo",
-                "sugestao_resposta": None,
+                "sugestao_resposta": default_response,
                 "raw_response": llama_response
             }
             
@@ -88,5 +110,5 @@ def analyze_email_content(content: str) -> dict:
             "confianca": 30,
             "resumo": "Erro na análise",
             "motivo": f"Erro ao processar: {str(e)}",
-            "sugestao_resposta": None
+            "sugestao_resposta": "Obrigado pelo seu contato. Houve um erro técnico no processamento, mas recebemos sua mensagem."
         }
