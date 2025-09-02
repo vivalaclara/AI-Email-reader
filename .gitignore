@@ -6,6 +6,7 @@ backend/venv/
 
 # Environment variables
 backend/.env
+frontend/.env.local
 
 # Next.js build output
 /frontend/.next/
